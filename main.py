@@ -2,6 +2,9 @@ from kivy.app import App
 from kivy.config import Config
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.image import Image
+from kivy.uix.button import Button
+from kivy.graphics.texture import Texture
 from kivy.clock import Clock
 from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg
 import osmnx as ox
@@ -9,10 +12,18 @@ import matplotlib.pyplot as plt
 from pyrosm import OSM
 import datetime
 import os
+import copy
 import pickle
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
 import numpy as np
+import cv2
+import serial
+import time
+import string
+import pynmea2
+import smbus					#import SMBus module of I2C
+from time import sleep          #import
 
 class MapViewerApp(App):
     def build(self):
@@ -53,33 +64,55 @@ class MapViewerApp(App):
         self.right_layout = BoxLayout(orientation='vertical', size_hint=(0.2, 1))
         self.layout.add_widget(self.right_layout)
 
+
+        #Reset map Button
+        self.reset_map = Button(text='Reset Map', font_size=30)
+        self.reset_map.bind(on_press=self.resetMap)
         # Date and Time Label
         self.datetime_label = Label(font_size=30)  # Adjust font size
+        self.speed_label = Label(font_size=20)
+        self.right_layout.add_widget(self.speed_label)
         self.right_layout.add_widget(self.datetime_label)
+        self.current_speed = 0
+        Clock.schedule_interval(self.update_speed, 1)
         self.update_datetime()
 
+        #Camera
+        self.cam_widget = Image()
+        self.cap = cv2.VideoCapture(0)
+        Clock.schedule_interval(self.update_camera, 1/30)
+        self.right_layout.add_widget(self.cam_widget)
+
+        #GPS
+        #self.update_location()
+        Clock.schedule_interval(self.update_location, 1)
+
+
         # Check if map.graphml exists
-        if os.path.exists('map.pkl'):
-            with open("map.pkl", "rb") as f:
-                self.G = pickle.load(f)
+        if os.path.exists('laJolla.pkl'):
+            with open("laJolla.pkl", "rb") as f:
+                self.originalMap = pickle.load(f)
+                self.G = copy.deepcopy(self.originalMap)
                 print("[DEBUG] pickle file loaded")
         else:
             self.pbf_file = "./map.pbf"
             self.osm = OSM(self.pbf_file)
-            self.G = self.load_graph()
+            self.originalMap = self.load_graph()
+            self.G = copy.deepcopy(self.originalMap)
 
         # self.G = ox.truncate.truncate_graph_bbox(self.G, (-117.8, 32.8, -118, 33))
         # Define the current location (longitude, latitude)
         current_location = (-117.1332, 32.5226)  #  UCSD coordinates
 
         # Calculate the bounding box for a 5-mile radius around the current location
-        bbox = ox.utils_geo.bbox_from_point(point=current_location, dist=4828.03)  # 5 miles in meters
-        print('bounding box', (bbox[3], bbox[2], bbox[1], bbox[0])) # (32.681275796937804, -117.20556578930018, 32.36392420306219, -117.06083421069982)
+        #bbox = ox.utils_geo.bbox_from_point(point=current_location, dist=4828.03)  # 5 miles in meters
+        ##print('bounding box', (bbox[3], bbox[2], bbox[1], bbox[0])) # (32.681275796937804, -117.20556578930018, 32.36392420306219, -117.06083421069982)
         # Truncate the graph to the bounding box
         #La Jolla box (-117.28626, 32.77712, -117.04971, 32.89929)
         # self.G = ox.truncate.truncate_graph_bbox(self.G, (bbox[3], bbox[2], bbox[1], bbox[0]))
-        self.G = ox.truncate.truncate_graph_bbox(self.G, (-117.28626, 32.77712, -117.04971, 32.89929))
+        #self.G = ox.truncate.truncate_graph_bbox(self.G, (-117.28626, 32.77712, -117.04971, 32.89929))
         # Bind click event
+        print("Graph Truncated")
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
         # Render Map
@@ -87,12 +120,47 @@ class MapViewerApp(App):
 
         return self.layout
 
+    def resetMap(self):
+        self.G = copy.deepcopy(self.originalMap)
+    
+    def update_speed(self, dt):
+        self.current_speed += 
+    
     def update_datetime(self, *args):
         """Updates the datetime label with the current date and time."""
         now = datetime.datetime.now().strftime("%-I:%M %p\n%-m/%d/%Y")
         self.datetime_label.text = now
         Clock.schedule_once(self.update_datetime, 1)
 
+    def update_camera(self, dt):
+        ret, frame = self.cap.read()
+        if ret:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            buf = frame.tobytes()
+            texture = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt='rgb')
+            texture.blit_buffer(buf, colorfmt='rgb', bufferfmt='ubyte')
+
+            self.cam_widget.texture = texture
+
+    def update_location(self, dt):
+        #ser=serial.Serial("/dev/ttyAMA0", baudrate=9600, timeout=1)
+        # dataout = pynmea2.NMEAStreamReader()
+        #newdata=ser.readline()
+        # print(newdata)
+        self.current_location = (-117.1332, 32.5226)
+        """
+        if '$GPRMC' in str(newdata):
+            # print(newdata.decode('utf-8'))
+            newmsg=pynmea2.parse(newdata.decode('utf-8'))
+            lat=newmsg.latitude
+            lng=newmsg.longitude
+            # gps = "Latitude=" + str(lat) + " and Longitude=" + str(lng)
+            # return (lat, lng)
+            self.current_location = (lat, lng)
+        else:
+            self.current_location = (-117.1332, 32.5226)
+        """
+        
     def load_graph(self):
         """Loads the road network from the .pbf file and converts it to a directed graph."""
         print("Load Graph")
@@ -120,11 +188,18 @@ class MapViewerApp(App):
         self.ax.clear()
         print("[DEBUG] render_map")
         # Highlight the route edges in blue
+        nearest_node = []
+        if hasattr(self, 'current_location'):
+            nearest_node = [ox.distance.nearest_nodes(self.G, self.current_location[0], self.current_location[1])]
+        print('DEBUG: nearest_node', nearest_node)
+        node_sizes = [1.0 if node in nearest_node else 0 for node in self.G.nodes()]
         if self.route:
             edge_colors = ['blue' if (u, v) in zip(self.route[:-1], self.route[1:]) or (v, u) in zip(self.route[:-1], self.route[1:]) else '#999999' for u, v in self.G.edges()]
-            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, edge_color=edge_colors, node_size=0, edge_linewidth=.5)
+            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, edge_color=edge_colors, node_color='green', node_size=node_sizes, edge_linewidth=.5)
         else:
-            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, node_size=0, edge_linewidth=0.5)
+            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, node_color='green', node_size=node_sizes, edge_linewidth=0.5)
+        
+
         # Refresh Kivy Canvas
         self.canvas.draw()
 
@@ -216,6 +291,11 @@ class MapViewerApp(App):
                 self.route = ox.shortest_path(self.G, self.src, self.dest)
                 print('Route: ', self.route)
                 if self.route:
+                    route_nodes = [self.G.nodes[node] for node in self.route]
+                    lons = [node['x'] for node in route_nodes]
+                    lats = [node['y'] for node in route_nodes]
+                    self.G = ox.truncate.truncate_graph_bbox(self.G, (min(lons), min(lats), max(lons), max(lats)), truncate_by_edge=True)
+                    self.right_layout.add_widget(self.reset_map)
                     self.render_map()  # Re-render the map to show the route
                     self.update_directions()  # Update the directions
 
