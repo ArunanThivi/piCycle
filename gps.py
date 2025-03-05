@@ -9,7 +9,7 @@ while True:
 	newdata=ser.readline()
 	# print(newdata)
 	if '$GPRMC' in str(newdata):
-		# print(newdata.decode('utf-8'))
+		print(newdata.decode('utf-8'))
 		newmsg=pynmea2.parse(newdata.decode('utf-8'))
 		lat=newmsg.latitude
 		lng=newmsg.longitude
