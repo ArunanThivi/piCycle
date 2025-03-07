@@ -32,13 +32,16 @@ class MapViewerApp(App):
         self.route = None  # Store the route
         self.title = "PiCycle"
         self.geometry = (720, 480)
-        self.current_location_marker = None
 
         # Main layout
         self.layout = BoxLayout(orientation='horizontal')
         # Left layout for map and title
         self.left_layout = BoxLayout(orientation='vertical', padding=0, spacing=0)
         self.layout.add_widget(self.left_layout)
+
+        # Title Label
+        self.title_label = Label(text="PiCycle", font_size=70, size_hint=(1, 0.1))
+        self.left_layout.add_widget(self.title_label)
 
         # Vertical layout for map and directions
         self.map_directions_layout = BoxLayout(orientation='vertical', size_hint=(1, 0.9))
@@ -70,7 +73,7 @@ class MapViewerApp(App):
         self.speed_label = Label(font_size=20)
         self.right_layout.add_widget(self.speed_label)
         self.right_layout.add_widget(self.datetime_label)
-        self.speed_offset = 0.198217626953125
+        self.speed_offset = 0.9819782714843749 - 1
         self.current_speed = 0
         #some MPU6050 Registers and their Address
         
@@ -82,6 +85,11 @@ class MapViewerApp(App):
         self.cap = cv2.VideoCapture(0)
         Clock.schedule_interval(self.update_camera, 1/30)
         self.right_layout.add_widget(self.cam_widget)
+
+        #GPS
+        #self.update_location()
+        Clock.schedule_interval(self.update_location, 1)
+
 
         # Check if map.graphml exists
         if os.path.exists('laJolla.pkl'):
@@ -97,9 +105,7 @@ class MapViewerApp(App):
 
         # self.G = ox.truncate.truncate_graph_bbox(self.G, (-117.8, 32.8, -118, 33))
         # Define the current location (longitude, latitude)
-        self.current_location = (-117.233652, 32.881983)
-        self.nearest_node = ox.distance.nearest_nodes(self.originalMap, self.current_location[0], self.current_location[1])
-        #Clock.schedule_interval(self.update_location, 1)
+        current_location = (-117.1332, 32.5226)  #  UCSD coordinates
 
         # Calculate the bounding box for a 5-mile radius around the current location
         #bbox = ox.utils_geo.bbox_from_point(point=current_location, dist=4828.03)  # 5 miles in meters
@@ -109,7 +115,7 @@ class MapViewerApp(App):
         # self.G = ox.truncate.truncate_graph_bbox(self.G, (bbox[3], bbox[2], bbox[1], bbox[0]))
         #self.G = ox.truncate.truncate_graph_bbox(self.G, (-117.28626, 32.77712, -117.04971, 32.89929))
         # Bind click event
-        
+        print("Graph Truncated")
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
         # Render Map
@@ -117,11 +123,8 @@ class MapViewerApp(App):
 
         return self.layout
 
-    def resetMap(self, _):
+    def resetMap(self):
         self.G = copy.deepcopy(self.originalMap)
-        self.route = None
-        self.render_map()
-        self.directions_layout.clear_widgets()
     
     
     
@@ -184,24 +187,23 @@ class MapViewerApp(App):
         GYRO_YOUT_H  = 0x45
         GYRO_ZOUT_H  = 0x47
         #Read Accelerometer raw value
-        #acc_x = self.read_raw_data(ACCEL_XOUT_H)
+        acc_x = self.read_raw_data(ACCEL_XOUT_H)
         acc_y = self.read_raw_data(ACCEL_YOUT_H)
-        #acc_z = self.read_raw_data(ACCEL_ZOUT_H)
+        acc_z = self.read_raw_data(ACCEL_ZOUT_H)
         
         #Read Gyroscope raw value
-        #gyro_x = self.read_raw_data(GYRO_XOUT_H)
-        #gyro_y = self.read_raw_data(GYRO_YOUT_H)
-        #gyro_z = self.read_raw_data(GYRO_ZOUT_H)
+        gyro_x = self.read_raw_data(GYRO_XOUT_H)
+        gyro_y = self.read_raw_data(GYRO_YOUT_H)
+        gyro_z = self.read_raw_data(GYRO_ZOUT_H)
         
         #Full scale range +/- 250 degree/C as per sensitivity scale factor
-        #Ax = acc_x/16384.0
-        Ay = acc_y/16384.0 - self.speed_offset
+        Ax = acc_x/16384.0
+        Ay = acc_y/16384.0
+        Az = acc_z/16384.0
         
-        #Az = acc_z/16384.0
-        
-        #Gx = gyro_x/131.0
-        #Gy = gyro_y/131.0
-        #Gz = gyro_z/131.0
+        Gx = gyro_x/131.0
+        Gy = gyro_y/131.0
+        Gz = gyro_z/131.0
         self.current_speed += Ay * 9.81
         self.speed_label.text = str(int(self.current_speed)) + " m/s"
         #print ("Gx=%.2f" %Gx, u'\u00b0'+ "/s", "\tGy=%.2f" %Gy, u'\u00b0'+ "/s", "\tGz=%.2f" %Gz, u'\u00b0'+ "/s", "\tAx=%.2f g" %Ax, "\tAy=%.2f g" %Ay, "\tAz=%.2f g" %Az)
@@ -211,9 +213,7 @@ class MapViewerApp(App):
         # dataout = pynmea2.NMEAStreamReader()
         #newdata=ser.readline()
         # print(newdata)
-        self.current_location = (-117.233652, 32.881983) #32°31'21.4"N 117°07'59.5"W
-        self.nearest_node = ox.distance.nearest_nodes(self.originalMap, self.current_location[0], self.current_location[1])
-        self.update_current_location_marker()
+        self.current_location = (-117.1332, 32.5226)
         """
         if '$GPRMC' in str(newdata):
             # print(newdata.decode('utf-8'))
@@ -230,7 +230,7 @@ class MapViewerApp(App):
     def load_graph(self):
         """Loads the road network from the .pbf file and converts it to a directed graph."""
         print("Load Graph")
-        nodes, edges = self.osm.get_network(network_type="driving", nodes=True)  # Get road network
+        nodes, edges = self.osm.get_network(network_type="cycling", nodes=True)  # Get road network
         # Filter nodes based on longitude
         nodes["x"] = nodes["lon"]
         nodes["y"] = nodes["lat"]
@@ -254,22 +254,19 @@ class MapViewerApp(App):
         self.ax.clear()
         print("[DEBUG] render_map")
         # Highlight the route edges in blue
+        nearest_node = []
+        if hasattr(self, 'current_location'):
+            nearest_node = [ox.distance.nearest_nodes(self.G, self.current_location[0], self.current_location[1])]
+        print('DEBUG: nearest_node', nearest_node)
+        node_sizes = [1.0 if node in nearest_node else 0 for node in self.G.nodes()]
         if self.route:
             edge_colors = ['blue' if (u, v) in zip(self.route[:-1], self.route[1:]) or (v, u) in zip(self.route[:-1], self.route[1:]) else '#999999' for u, v in self.G.edges()]
-            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, edge_color=edge_colors, node_size=0, edge_linewidth=.5)
+            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, edge_color=edge_colors, node_color='green', node_size=node_sizes, edge_linewidth=.5)
         else:
-            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, node_size=0, edge_linewidth=0.5)
+            ox.plot_graph(self.G, ax=self.ax, show=False, close=False, node_color='green', node_size=node_sizes, edge_linewidth=0.5)
+        
+
         # Refresh Kivy Canvas
-        self.update_current_location_marker()
-        self.canvas.draw()
-
-    def update_current_location_marker(self):
-        """Updates the green dot's position on the map."""
-        #if self.G.nodes(self.nearest_node)
-        if self.nearest_node in self.G.nodes:
-            self.current_location_marker= self.G.nodes[self.nearest_node]['x'], self.G.nodes[self.nearest_node]['y']
-            self.current_location_marker, = self.ax.plot(self.current_location_marker[0], self.current_location_marker[1], 'go', markersize=10, zorder=2)
-
         self.canvas.draw()
 
     def update_directions(self):
@@ -289,7 +286,9 @@ class MapViewerApp(App):
         for i in range(len(self.route) - 2):
             u, v, w = self.route[i], self.route[i + 1], self.route[i + 2]
             edge_data_uv = self.G.get_edge_data(u, v)
+            print('uv', edge_data_uv)
             edge_data_vw = self.G.get_edge_data(v, w)
+            print('vw', edge_data_vw)
             if edge_data_uv and edge_data_vw:
                 edge_uv = edge_data_uv[0]
                 edge_vw = edge_data_vw[0]
@@ -349,23 +348,22 @@ class MapViewerApp(App):
             x, y = event.xdata, event.ydata
             print(f"Clicked at coordinates: ({x}, {y})")
             nearest_node = ox.distance.nearest_nodes(self.G, x, y)
-           # if not self.src or self.dest:
-           #     self.src = nearest_node
-           #     self.dest = None
-           #     self.route = None  # Reset the route
-           # else:
-            self.dest = nearest_node
-            self.route = ox.shortest_path(self.G, self.nearest_node, self.dest)
-            print('Route: ', self.route)
-            if self.route:
-                route_nodes = [self.G.nodes[node] for node in self.route]
-                lons = [node['x'] for node in route_nodes]
-                lats = [node['y'] for node in route_nodes]
-                self.G = ox.truncate.truncate_graph_bbox(self.G, (min(lons), min(lats), max(lons), max(lats)), truncate_by_edge=True)
-                if not self.reset_map.parent:
+            if not self.src or self.dest:
+                self.src = nearest_node
+                self.dest = None
+                self.route = None  # Reset the route
+            else:
+                self.dest = nearest_node
+                self.route = ox.shortest_path(self.G, self.src, self.dest)
+                print('Route: ', self.route)
+                if self.route:
+                    route_nodes = [self.G.nodes[node] for node in self.route]
+                    lons = [node['x'] for node in route_nodes]
+                    lats = [node['y'] for node in route_nodes]
+                    self.G = ox.truncate.truncate_graph_bbox(self.G, (min(lons), min(lats), max(lons), max(lats)), truncate_by_edge=True)
                     self.right_layout.add_widget(self.reset_map)
-                self.render_map()  # Re-render the map to show the route
-                self.update_directions()  # Update the directions
+                    self.render_map()  # Re-render the map to show the route
+                    self.update_directions()  # Update the directions
 
 if __name__ == "__main__":
     Config.set('graphics', 'width', '800')

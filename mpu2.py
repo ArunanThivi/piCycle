@@ -51,26 +51,28 @@ def read_raw_data(addr):
         return value
 
 def calibrate():
-    print("Calibrating accelerometer...")
-    accel_offset = 0
+	print("Calibrating accelerometer...")
+	accel_offset = 0
+
+	accel_data = []
+	for _ in range(1000):
+		acc_y = read_raw_data(ACCEL_YOUT_H)
+		Ay = acc_y/16384.0 - 0.198217626953125
+		if abs(Ay) < 0.01:
+			Ay = 0
+		accel_data.append(Ay)
+		time.sleep(.01)
     
-    accel_data = []
-    for _ in range(1000):
-        acc_y = read_raw_data(ACCEL_YOUT_H)
-        Ay = acc_y/16384.0 - 0.98254150390625 - 0.0010632324218750532 + 0.0005
-        accel_data.append(Ay)
-        time.sleep(.01)
-    
-    accel_offset = np.mean(accel_data)
-    print(accel_offset)
+	accel_offset = np.mean(accel_data)
+	print(accel_offset)
     
 bus = smbus.SMBus(1) 	# or bus = smbus.SMBus(0) for older version boards
 Device_Address = 0x68   # MPU6050 device address
 
 MPU_Init()
-#calibrate()
+calibrate()
 print (" Reading Data of Gyroscope and Accelerometer")
-
+"""
 while True:
 	offset = 0.9819782714843749 - 1
 	#Read Accelerometer raw value
@@ -99,3 +101,4 @@ while True:
 	print(Ay_adj)
 	#print ("Gx=%.2f" %Gx, u'\u00b0'+ "/s", "\tGy=%.2f" %Gy, u'\u00b0'+ "/s", "\tGz=%.2f" %Gz, u'\u00b0'+ "/s", "\tAx=%.2f g" %Ax, "\tAy=%.2f g" %Ay, "\tAz=%.2f g" %Az) 	
 	sleep(1)
+"""
